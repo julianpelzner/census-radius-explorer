@@ -1,0 +1,176 @@
+Metadata-Version: 2.4
+Name: census-radius-explorer
+Version: 0.1.0
+Summary: ACS demographics for census tracts or ZCTAs within a radius of a US location.
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: pandas
+Requires-Dist: geopandas
+Requires-Dist: pygris
+Requires-Dist: requests
+Requires-Dist: geopy
+Requires-Dist: pandera
+Requires-Dist: pyarrow
+Requires-Dist: pyyaml
+Requires-Dist: streamlit
+Requires-Dist: folium
+Requires-Dist: streamlit-folium
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
+
+# Census Radius Explorer
+
+Enter a US city or address and a radius in miles to get American Community Survey (ACS) demographics for every census tract or ZIP Code Tabulation Area (ZCTA) within that distance, shown on an interactive map.
+
+> **Status: in development.** The repository currently contains design and validation docs only. The architecture, layout, and commands below describe the planned design; features are checked off in the [Roadmap](#roadmap) as they're built.
+
+**Contents:** [What it will do](#what-it-will-do) · [Architecture](#architecture) · [Design decisions](#design-decisions) · [Data sources](#data-sources) · [Getting started](#getting-started) · [Configuration](#configuration) · [Development](#development) · [Roadmap](#roadmap)
+
+## What it will do
+
+1. You enter a location (a city or street address), a radius in miles, and a geography level: **census tracts** or **ZCTAs**.
+2. The app geocodes the location and draws a circle of that radius around it.
+3. It selects every area whose interior point falls inside the circle.
+4. It pulls ACS 5-year estimates for only those areas, validates them, and joins them to their boundary shapes.
+5. It shows a choropleth map with the circle overlaid, a summary table, and GeoJSON/CSV downloads.
+
+## Architecture
+
+```mermaid
+flowchart TD
+  U["User input: location, radius, geography"] --> G["Geocode"]
+  G --> B["Buffer the point (EPSG:5070)"]
+  B --> L{"Geography?"}
+  L -- Tracts --> TC["Counties in circle"] --> TS["Tract shapes for those states"]
+  L -- ZCTAs --> ZS["Cached national ZCTA shapes"]
+  TS --> F["Center-inside filter"]
+  ZS --> F
+  F --> A["ACS API pull: by county or ZCTA list"]
+  A --> V{"Valid?"}
+  V -- pass --> J["Join on GEOID"] --> O["Streamlit map + downloads"]
+  V -. fail .-> E["Show error"]
+  O -. optional .-> T["Tableau Public"]
+  C[("Cache")] -.- A
+```
+
+## Design decisions
+
+- **Center-inside filtering.** An area counts as inside the radius when its interior point (`representative_point()`) falls within the circle. This is simple and predictable, but it undercounts at the edges. Totals are therefore labeled "areas whose center is within X miles," not as exact counts within X miles.
+- **Two geography levels, two ingestion paths.**
+  - *Tracts:* nested in counties, so the app finds the counties the circle touches and pulls tract data county by county.
+  - *ZCTAs:* cross county and state lines, so the app selects them from a cached national shape file and requests data for that list of codes.
+- **pandas for joins.** Each request involves at most a few thousand rows keyed on one GEOID, so tables are combined with pandas `merge(..., validate="one_to_one")`, and geopandas handles all spatial work. No SQL engine is needed at this scale.
+- **Cache everything.** ACS estimates are fixed once a year is released, so every API response and shape download is cached by year and geography. A repeat query never calls the API again.
+- **Validation before display.** Checks on GEOID format, coverage, data types, sentinel values, and geometry run before anything is mapped. If a check fails, the app shows an error instead of a misleading map. The full list is in [docs/validation.md](docs/validation.md).
+
+## Data sources
+
+- [Census Data API](https://www.census.gov/data/developers.html): ACS 5-year estimates
+- [Cartographic boundary files](https://www.census.gov/geographies/mapping-files/time-series/geo/cartographic-boundary.html), via [pygris](https://github.com/walkerke/pygris): tract, county, and ZCTA shapes
+- [Census Geocoder](https://geocoding.geo.census.gov/), with Nominatim (OpenStreetMap) as a fallback for city names
+
+**Caveats:** ACS figures are survey estimates with margins of error. ZCTAs approximate ZIP code areas but are not the same thing. Boundary files and ACS data are matched by year.
+
+## Planned layout
+
+```
+census-radius-explorer/
+├── app/streamlit_app.py          # UI: form, map, downloads
+├── src/census_radius_explorer/   # geocode, scope, extract, cache, transform, validate, join, pipeline
+├── run_pipeline.py               # CLI wrapper
+├── scripts/build_reference.py    # one-time national county + ZCTA reference files
+├── config/pipeline.yaml          # ACS year, variables, max radius
+├── tests/                        # pytest with fixtures; no live API calls
+├── docs/validation.md            # validation checks + testing spec
+└── .github/workflows/ci.yml      # tests + lint on every push
+```
+
+## Tech stack
+
+- **Runtime:** Python 3.11+, pandas, geopandas, pygris, requests, geopy, pandera, pyarrow, PyYAML
+- **App:** Streamlit, folium, streamlit-folium
+- **Dev:** pytest, ruff, GitHub Actions
+
+## Getting started
+
+> These steps describe the intended workflow. They will work once the package and `pyproject.toml` land (see [Roadmap](#roadmap)).
+
+### 1. Get a Census API key
+
+Request a free key at <https://api.census.gov/data/key_signup.html>. The app reads `CENSUS_API_KEY` from the environment or, when running in Streamlit, from `st.secrets`.
+
+```bash
+cp .env.example .env          # then put your key in .env
+# or, for Streamlit:
+# echo 'CENSUS_API_KEY = "your_key"' > .streamlit/secrets.toml
+```
+
+Both `.env` and `.streamlit/secrets.toml` are git-ignored. Never commit the key.
+
+### 2. Install
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+### 3. Build the reference data (one time)
+
+```bash
+python scripts/build_reference.py
+```
+
+This downloads national county and ZCTA boundaries and saves them as GeoParquet, so later queries don't re-download them.
+
+### 4. Run
+
+```bash
+# Streamlit app
+streamlit run app/streamlit_app.py
+
+# Command line
+python run_pipeline.py --location "Denver, CO" --radius 10 --geo tract
+```
+
+`--geo` takes `tract` or `zcta`. API responses and shapes are cached under `data/cache/`. Delete that folder to force a fresh pull.
+
+## Configuration
+
+All tunable settings live in `config/pipeline.yaml`; nothing is hard-coded:
+
+- ACS 5-year release year
+- ACS variables to pull and the derived rates built from them
+- maximum allowed radius (`max_radius_mi`)
+- null-share warning threshold (`max_null_share`)
+- cache paths
+
+To change the survey year or add a variable, edit the YAML. You don't need to touch code.
+
+## Development
+
+```bash
+pytest          # unit tests; all HTTP is mocked, no live API calls
+ruff check .    # lint
+```
+
+A change is done when `pytest` passes and `ruff check .` is clean. Data checks and test requirements are specified in [docs/validation.md](docs/validation.md). If you add or change a check, update that file in the same change.
+
+Conventions the code follows:
+
+- GEOIDs are always strings: 11 characters for tracts, 5 for ZCTAs. Never cast them to int.
+- Buffering and selection happen in EPSG:5070 (equal-area, in meters); output is EPSG:4326.
+- Every pandas merge passes `validate=` with the expected relationship.
+- Census sentinel negatives (e.g. `-666666666`) are converted to nulls during transform.
+- Every API call and shape download goes through `cache.py`.
+
+## Roadmap
+
+- [ ] Scaffold package, config, and CI
+- [ ] Reference data (national counties and ZCTAs)
+- [ ] Geocoding and center-inside scoping
+- [ ] ACS ingestion with caching
+- [ ] Transform, validate, and join
+- [ ] Streamlit app
+- [ ] Deploy to Streamlit Community Cloud

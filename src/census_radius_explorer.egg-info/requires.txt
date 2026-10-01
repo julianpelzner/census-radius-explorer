@@ -1,0 +1,15 @@
+pandas
+geopandas
+pygris
+requests
+geopy
+pandera
+pyarrow
+pyyaml
+streamlit
+folium
+streamlit-folium
+
+[dev]
+pytest
+ruff

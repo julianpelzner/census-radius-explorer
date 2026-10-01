@@ -1,0 +1,3 @@
+# Pipeline settings. Schema not defined yet; planned keys:
+#   ACS 5-year release year, ACS variables and derived rates,
+#   max_radius_mi, max_null_share, cache paths.

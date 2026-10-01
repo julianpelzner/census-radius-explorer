@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "census-radius-explorer"
+version = "0.1.0"
+description = "ACS demographics for census tracts or ZCTAs within a radius of a US location."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas",
+    "geopandas",
+    "pygris",
+    "requests",
+    "geopy",
+    "pandera",
+    "pyarrow",
+    "pyyaml",
+    "streamlit",
+    "folium",
+    "streamlit-folium",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
