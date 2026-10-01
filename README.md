@@ -2,7 +2,9 @@
 
 Enter a US city or address and a radius in miles to get American Community Survey (ACS) demographics for every census tract or ZIP Code Tabulation Area (ZCTA) within that distance, shown on an interactive map.
 
-> **Status: in development.** This README describes the planned design. Features are marked done in the [Roadmap](#roadmap) as they're built.
+> **Status: in development.** The repository currently contains design and validation docs only. The architecture, layout, and commands below describe the planned design; features are checked off in the [Roadmap](#roadmap) as they're built.
+
+**Contents:** [What it will do](#what-it-will-do) · [Architecture](#architecture) · [Design decisions](#design-decisions) · [Data sources](#data-sources) · [Getting started](#getting-started) · [Configuration](#configuration) · [Development](#development) · [Roadmap](#roadmap)
 
 ## What it will do
 
@@ -65,7 +67,82 @@ census-radius-explorer/
 
 ## Tech stack
 
-Python · pandas · geopandas · pygris · pandera · Streamlit · folium · pytest · GitHub Actions
+- **Runtime:** Python 3.11+, pandas, geopandas, pygris, requests, geopy, pandera, pyarrow, PyYAML
+- **App:** Streamlit, folium, streamlit-folium
+- **Dev:** pytest, ruff, GitHub Actions
+
+## Getting started
+
+> These steps describe the intended workflow. They will work once the package and `pyproject.toml` land (see [Roadmap](#roadmap)).
+
+### 1. Get a Census API key
+
+Request a free key at <https://api.census.gov/data/key_signup.html>. The app reads `CENSUS_API_KEY` from the environment or, when running in Streamlit, from `st.secrets`.
+
+```bash
+cp .env.example .env          # then put your key in .env
+# or, for Streamlit:
+# echo 'CENSUS_API_KEY = "your_key"' > .streamlit/secrets.toml
+```
+
+Both `.env` and `.streamlit/secrets.toml` are git-ignored. Never commit the key.
+
+### 2. Install
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+### 3. Build the reference data (one time)
+
+```bash
+python scripts/build_reference.py
+```
+
+This downloads national county and ZCTA boundaries and saves them as GeoParquet, so later queries don't re-download them.
+
+### 4. Run
+
+```bash
+# Streamlit app
+streamlit run app/streamlit_app.py
+
+# Command line
+python run_pipeline.py --location "Denver, CO" --radius 10 --geo tract
+```
+
+`--geo` takes `tract` or `zcta`. API responses and shapes are cached under `data/cache/`. Delete that folder to force a fresh pull.
+
+## Configuration
+
+All tunable settings live in `config/pipeline.yaml`; nothing is hard-coded:
+
+- ACS 5-year release year
+- ACS variables to pull and the derived rates built from them
+- maximum allowed radius (`max_radius_mi`)
+- null-share warning threshold (`max_null_share`)
+- cache paths
+
+To change the survey year or add a variable, edit the YAML. You don't need to touch code.
+
+## Development
+
+```bash
+pytest          # unit tests; all HTTP is mocked, no live API calls
+ruff check .    # lint
+```
+
+A change is done when `pytest` passes and `ruff check .` is clean. Data checks and test requirements are specified in [docs/validation.md](docs/validation.md). If you add or change a check, update that file in the same change.
+
+Conventions the code follows:
+
+- GEOIDs are always strings: 11 characters for tracts, 5 for ZCTAs. Never cast them to int.
+- Buffering and selection happen in EPSG:5070 (equal-area, in meters); output is EPSG:4326.
+- Every pandas merge passes `validate=` with the expected relationship.
+- Census sentinel negatives (e.g. `-666666666`) are converted to nulls during transform.
+- Every API call and shape download goes through `cache.py`.
 
 ## Roadmap
 
@@ -76,7 +153,3 @@ Python · pandas · geopandas · pygris · pandera · Streamlit · folium · pyt
 - [ ] Transform, validate, and join
 - [ ] Streamlit app
 - [ ] Deploy to Streamlit Community Cloud
-
-## How to run
-
-*Coming soon: setup and run instructions will be added once the pipeline runs end to end.*
