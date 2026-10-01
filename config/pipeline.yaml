@@ -1,3 +1,63 @@
 # Pipeline settings. Schema not defined yet; planned keys:
 #   ACS 5-year release year, ACS variables and derived rates,
 #   max_radius_mi, max_null_share, cache paths.
+
+acs:
+  year: 2024                 # 2020–2024 ACS 5-year
+  dataset: acs/acs5
+  include_moe: false         # true also fetches the *_M margin-of-error columns
+
+boundaries:
+  tract_year: 2024           # match the ACS year
+  zcta_year: 2020            # ZCTA boundaries only change after each decennial census
+
+query:
+  default_radius_mi: 5
+  max_radius_mi: 50
+  geographies: [tract, zcta]
+
+variables:                   # raw ACS inputs
+  - code: B01003_001E
+    name: total_pop
+    label: Total population
+    type: count
+  - code: B19013_001E
+    name: median_hh_income
+    label: Median household income
+    type: median
+    unit: usd
+  - code: B17001_002E
+    name: pop_below_poverty
+    type: count
+  - code: B17001_001E
+    name: pop_poverty_universe
+    type: universe
+  - code: B25003_002E
+    name: owner_occupied
+    type: count
+  - code: B25003_001E
+    name: occupied_units
+    type: universe
+
+derived:                     # metrics computed from the raw inputs
+  - name: poverty_rate
+    label: Poverty rate
+    numerator: [pop_below_poverty]
+    denominator: pop_poverty_universe
+    format: percent
+  - name: homeownership_rate
+    label: Homeownership rate
+    numerator: [owner_occupied]
+    denominator: occupied_units
+    format: percent
+
+map_metrics: [total_pop, median_hh_income, poverty_rate, homeownership_rate]
+
+validation:
+  max_null_share: 0.25
+
+cache:
+  dir: data/cache
+
+geocoding:
+  nominatim_user_agent: "census-radius-explorer (${NOMINATIM_EMAIL})"
